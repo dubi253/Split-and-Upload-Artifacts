@@ -27,7 +27,7 @@ Example workflow step:
 
 ```yaml
 - name: Split & upload large data
-  uses: your-username/split-upload-action@v1
+  uses: your-username/split-upload-action@v1.0.1
   with:
     source: ./my-large-folder/
     volume-size: 5g
