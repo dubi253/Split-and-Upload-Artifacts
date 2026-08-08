@@ -1,0 +1,38 @@
+name: "Split and Upload Artifacts"
+description: "Compress files/folders into volume-limited ZIP parts and upload each part as a separate artifact"
+author: "your-github-username"
+
+inputs:
+  source:
+    description: "Path(s) to the file(s) or directory to compress. Supports globs and space-separated paths."
+    required: true
+  volume-size:
+    description: 'Maximum size per volume (e.g., "5g", "1000m").'
+    required: false
+    default: "5g"
+  archive-name:
+    description: "Base name for the ZIP archive (without extension)."
+    required: false
+    default: "artifact"
+  artifact-prefix:
+    description: "Prefix added to each artifact name in the Actions list."
+    required: false
+    default: ""
+  compression-level:
+    description: "ZIP compression level 0-9 (0 = store only). Default 6."
+    required: false
+    default: "6"
+
+outputs:
+  volumes:
+    description: "Number of volume parts created"
+  uploaded-artifacts:
+    description: "List of uploaded artifact names (comma-separated)"
+
+runs:
+  using: "node26"
+  main: "index.js"
+
+branding:
+  icon: "archive"
+  color: "blue"
