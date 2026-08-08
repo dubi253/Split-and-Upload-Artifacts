@@ -38,7 +38,7 @@ Example workflow step:
 
 ## Local testing
 
-Install dependencies and run (Node >= 26 required):
+Install dependencies and run (Node >= 24 required):
 
 ```bash
 npm install
