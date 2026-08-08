@@ -55,7 +55,18 @@ async function run() {
       return;
     }
 
-    const client = artifact.create();
+    let client;
+    if (process.env.TEST_MODE === "1") {
+      client = {
+        uploadArtifact: async (name, files, cwd) => {
+          const marker = path.join(cwd, `${name}.uploaded.txt`);
+          fs.writeFileSync(marker, files.join("\n"));
+          return { artifactName: name, failedItems: [] };
+        },
+      };
+    } else {
+      client = artifact.create();
+    }
     const uploaded = [];
 
     for (let i = 0; i < parts.length; i++) {
