@@ -178,7 +178,7 @@ async function main() {
   const pathInput = getInput("path") || getInput("source");
   if (!pathInput) fail('input "path" is required');
 
-  const retentionDays = parseInt(getInput("retention-days"), 10) || 0;
+  const retentionDays = parseInt(getInput("retention-days"), 10) || 3;
   const overwrite = getInput("overwrite") === "true";
   const archive = getInput("archive") === "true";
   const ifNone = getInput("if-no-files-found") || "warn";

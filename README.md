@@ -14,7 +14,7 @@ Upload files directly as separate GitHub Actions artifacts without ZIP wrapping.
 - `path` (required): Path(s) or glob(s) to files to upload. Supports comma, newline, or space separated patterns.
 - `source` (optional): Backward-compatible alias for `path`.
 - `artifact-prefix` (default ``): Optional prefix added to each artifact name.
-- `retention-days` (optional): Artifact retention in days.
+- `retention-days` (default `3`): Artifact retention in days.
 - `overwrite` (optional): Replace an existing artifact with the same name.
 - `archive` (default `false`): Set to `true` to gzip-compress each file before upload.
 - `if-no-files-found` (default `warn`): `warn`, `error`, or `ignore` when nothing matches.

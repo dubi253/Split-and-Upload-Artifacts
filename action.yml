@@ -12,6 +12,7 @@ inputs:
   retention-days:
     description: "Number of days to keep the artifact."
     required: false
+    default: "3"
   overwrite:
     description: "Replace an existing artifact with the same name."
     required: false
