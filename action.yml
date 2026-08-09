@@ -1,4 +1,4 @@
-name: "upload-artifacts"
+name: "Upload Artifacts"
 description: "Upload files as separate GitHub Actions artifacts without ZIP wrapping"
 author: "your-github-username"
 
