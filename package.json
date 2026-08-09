@@ -1,6 +1,6 @@
 {
   "name": "upload-artifacts",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "description": "Upload files directly as separate GitHub Action artifacts without ZIP wrapping",
   "main": "index.js",
   "engines": {
