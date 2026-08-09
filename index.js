@@ -2,8 +2,18 @@
 "use strict";
 
 const core = require("@actions/core");
-const { statSync, globSync, writeFileSync } = require("node:fs");
+const {
+  statSync,
+  globSync,
+  writeFileSync,
+  createReadStream,
+  appendFileSync,
+} = require("node:fs");
 const { basename, resolve } = require("node:path");
+const { createHash } = require("node:crypto");
+const https = require("node:https");
+
+const SERVICE = "github.actions.results.api.v1.ArtifactService";
 
 const getInput = (n) =>
   (process.env[`INPUT_${n.replace(/ /g, "_").toUpperCase()}`] || "").trim();
@@ -15,6 +25,127 @@ function fail(m) {
 
 function setOutput(name, value) {
   core.setOutput(name, value);
+}
+
+function backend() {
+  const url = (process.env.ACTIONS_RESULTS_URL || "").replace(/\/+$/, "");
+  const token = process.env.ACTIONS_RUNTIME_TOKEN || "";
+  if (!url || !token) {
+    fail(
+      "ACTIONS_RESULTS_URL / ACTIONS_RUNTIME_TOKEN are unset; this action only runs inside a GitHub Actions job",
+    );
+  }
+  const claims = JSON.parse(
+    Buffer.from(token.split(".")[1], "base64url").toString(),
+  );
+  const scope = claims.scp
+    .split(" ")
+    .find((s) => s.startsWith("Actions.Results:"))
+    .split(":");
+  return { url, token, run: scope[1], job: scope[2] };
+}
+
+async function twirp(be, method, body) {
+  const res = await fetch(`${be.url}/twirp/${SERVICE}/${method}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${be.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (res.status !== 200) {
+    fail(`${method} returned HTTP ${res.status}: ${await res.text()}`);
+  }
+  return res.json();
+}
+
+async function deleteIfExists(be, name) {
+  const list = await twirp(be, "ListArtifacts", {
+    workflowRunBackendId: be.run,
+    workflowJobRunBackendId: be.job,
+    nameFilter: name,
+  });
+  if (!(list.artifacts || []).length) return;
+  await twirp(be, "DeleteArtifact", {
+    workflowRunBackendId: be.run,
+    workflowJobRunBackendId: be.job,
+    name,
+  });
+}
+
+function putBlob(url, file, size) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const req = https.request(
+      url,
+      {
+        method: "PUT",
+        headers: {
+          "x-ms-blob-type": "BlockBlob",
+          "x-ms-version": "2023-11-03",
+          "Content-Type": "application/octet-stream",
+          "Content-Length": size,
+        },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (d) => (body += d));
+        res.on("end", () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(hash.digest("hex"));
+          } else {
+            reject(new Error(`blob PUT HTTP ${res.statusCode}: ${body}`));
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    const rs = createReadStream(file);
+    rs.on("error", reject);
+    rs.on("data", (c) => hash.update(c));
+    rs.pipe(req);
+  });
+}
+
+async function uploadRawArtifact(be, name, file, size, retentionDays) {
+  const create = {
+    workflowRunBackendId: be.run,
+    workflowJobRunBackendId: be.job,
+    name,
+    version: 4,
+    archive: false,
+  };
+  if (retentionDays > 0) {
+    create.expiresAt = new Date(Date.now() + retentionDays * 86400000)
+      .toISOString()
+      .replace(/\.\d+Z$/, "Z");
+  }
+
+  const created = await twirp(be, "CreateArtifact", create);
+  if (!created.ok) {
+    fail(
+      `CreateArtifact rejected '${name}' (does it already exist? try overwrite: true)`,
+    );
+  }
+  if (!created.signed_upload_url) {
+    fail(
+      `CreateArtifact gave no upload URL for '${name}'; response keys: ${Object.keys(created).join(", ")}`,
+    );
+  }
+
+  const sha = await putBlob(created.signed_upload_url, file, size);
+
+  const fin = await twirp(be, "FinalizeArtifact", {
+    workflowRunBackendId: be.run,
+    workflowJobRunBackendId: be.job,
+    name,
+    size: String(size),
+    hash: `sha256:${sha}`,
+  });
+  if (!fin.ok) fail(`FinalizeArtifact rejected '${name}'`);
+
+  return { name, id: Number(fin.artifact_id), size };
 }
 
 function splitPatterns(s) {
@@ -35,11 +166,12 @@ async function main() {
 
   const retentionDays = parseInt(getInput("retention-days"), 10) || 0;
   const overwrite = getInput("overwrite") === "true";
+  const archive = getInput("archive") === "true";
   const ifNone = getInput("if-no-files-found") || "warn";
   const prefix = getInput("artifact-prefix") || "";
-  const { DefaultArtifactClient } = await import("@actions/artifact");
-  const client =
-    process.env.TEST_MODE === "1"
+  const testMode = process.env.TEST_MODE === "1";
+  const client = archive
+    ? testMode
       ? {
           uploadArtifact: async (name, files) => {
             const marker = resolve(process.cwd(), `${name}.uploaded.txt`);
@@ -48,7 +180,8 @@ async function main() {
           },
           deleteArtifact: async () => ({ id: 0 }),
         }
-      : new DefaultArtifactClient();
+      : new (await import("@actions/artifact")).DefaultArtifactClient()
+    : null;
 
   const patterns = splitPatterns(pathInput);
   const files = [...new Set(patterns.flatMap((p) => globSync(p)))].filter(
@@ -84,13 +217,26 @@ async function main() {
 
   const results = [];
   for (const [name, { file, size }] of jobs) {
-    if (overwrite && typeof client.deleteArtifact === "function") {
-      await client.deleteArtifact(name);
+    let r;
+    if (archive) {
+      if (overwrite && typeof client.deleteArtifact === "function") {
+        await client.deleteArtifact(name);
+      }
+      r = await client.uploadArtifact(name, [resolve(file)], {
+        retentionDays,
+        compressionLevel: 6,
+      });
+    } else {
+      if (testMode) {
+        const marker = resolve(process.cwd(), `${name}.uploaded.txt`);
+        writeFileSync(marker, resolve(file));
+        r = { id: Number(String(name).length), size };
+      } else {
+        const be = backend();
+        if (overwrite) await deleteIfExists(be, name);
+        r = await uploadRawArtifact(be, name, resolve(file), size, retentionDays);
+      }
     }
-    const r = await client.uploadArtifact(name, [resolve(file)], {
-      retentionDays,
-      compressionLevel: 0,
-    });
     notice(`uploaded '${name}' (id ${r.id}, ${r.size || size} bytes)`);
     results.push({ name: r.name || name, id: Number(r.id), size });
   }

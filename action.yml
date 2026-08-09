@@ -15,6 +15,10 @@ inputs:
   overwrite:
     description: "Replace an existing artifact with the same name."
     required: false
+  archive:
+    description: "When true, upload through the artifact archive compressor. When false, upload the original file bytes directly."
+    required: false
+    default: "false"
   if-no-files-found:
     description: "What to do when no files match: warn, error, or ignore."
     required: false
