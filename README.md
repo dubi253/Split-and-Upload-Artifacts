@@ -2,6 +2,8 @@
 
 Upload files directly as separate GitHub Actions artifacts without ZIP wrapping.
 
+中文说明请见 [README.zh-CN.md](README.zh-CN.md).
+
 ## Features
 
 - Upload each file as an independent artifact
@@ -31,12 +33,9 @@ Example workflow step:
 
 ```yaml
 - name: Upload files as artifacts
-  uses: your-username/upload-artifacts@v1.0.1
+  uses: dubi253/upload-artifacts@v1.0.7
   with:
-    path: ./dist/**/*.txt
-    artifact-prefix: myapp
-    archive: false
-    overwrite: true
+    path: images.tar.gz.part*
 ```
 
 When `archive: true`, each file is compressed with gzip before being uploaded as the artifact payload.
