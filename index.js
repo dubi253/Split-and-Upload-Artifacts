@@ -1,30 +1,36 @@
 #!/usr/bin/env node
 "use strict";
 
-const core = require("@actions/core");
 const {
   statSync,
   globSync,
   writeFileSync,
   createReadStream,
+  createWriteStream,
   appendFileSync,
+  unlinkSync,
 } = require("node:fs");
 const { basename, resolve } = require("node:path");
 const { createHash } = require("node:crypto");
 const https = require("node:https");
+const { createGzip } = require("node:zlib");
+const { pipeline } = require("node:stream/promises");
 
 const SERVICE = "github.actions.results.api.v1.ArtifactService";
 
 const getInput = (n) =>
   (process.env[`INPUT_${n.replace(/ /g, "_").toUpperCase()}`] || "").trim();
-const warning = (m) => core.warning(m);
-const notice = (m) => core.notice(m);
+const warning = (m) => console.log(`::warning::${m}`);
+const notice = (m) => console.log(`::notice::${m}`);
 function fail(m) {
   throw new Error(m);
 }
 
 function setOutput(name, value) {
-  core.setOutput(name, value);
+  const file = process.env.GITHUB_OUTPUT;
+  if (!file) return;
+  const delimiter = `ghadelim_${Math.random().toString(36).slice(2)}`;
+  appendFileSync(file, `${name}<<${delimiter}\n${value}\n${delimiter}\n`);
 }
 
 function backend() {
@@ -148,6 +154,14 @@ async function uploadRawArtifact(be, name, file, size, retentionDays) {
   return { name, id: Number(fin.artifact_id), size };
 }
 
+async function gzipFile(sourceFile, targetFile) {
+  await pipeline(
+    createReadStream(sourceFile),
+    createGzip(),
+    createWriteStream(targetFile),
+  );
+}
+
 function splitPatterns(s) {
   return s
     .split(/[\s,\n]+/)
@@ -219,13 +233,25 @@ async function main() {
   for (const [name, { file, size }] of jobs) {
     let r;
     if (archive) {
-      if (overwrite && typeof client.deleteArtifact === "function") {
-        await client.deleteArtifact(name);
+      if (testMode) {
+        const marker = resolve(process.cwd(), `${name}.uploaded.txt`);
+        writeFileSync(marker, resolve(file));
+        r = { id: Number(String(name).length), size };
+      } else {
+        const compressedFile = resolve(process.cwd(), `${name}.gz`);
+        await gzipFile(resolve(file), compressedFile);
+        const compressedSize = statSync(compressedFile).size;
+        const be = backend();
+        if (overwrite) await deleteIfExists(be, name);
+        r = await uploadRawArtifact(
+          be,
+          name,
+          compressedFile,
+          compressedSize,
+          retentionDays,
+        );
+        unlinkSync(compressedFile);
       }
-      r = await client.uploadArtifact(name, [resolve(file)], {
-        retentionDays,
-        compressionLevel: 6,
-      });
     } else {
       if (testMode) {
         const marker = resolve(process.cwd(), `${name}.uploaded.txt`);
@@ -234,7 +260,13 @@ async function main() {
       } else {
         const be = backend();
         if (overwrite) await deleteIfExists(be, name);
-        r = await uploadRawArtifact(be, name, resolve(file), size, retentionDays);
+        r = await uploadRawArtifact(
+          be,
+          name,
+          resolve(file),
+          size,
+          retentionDays,
+        );
       }
     }
     notice(`uploaded '${name}' (id ${r.id}, ${r.size || size} bytes)`);

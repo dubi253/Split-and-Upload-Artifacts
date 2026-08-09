@@ -6,7 +6,7 @@ Upload files directly as separate GitHub Actions artifacts without ZIP wrapping.
 
 - Upload each file as an independent artifact
 - Upload original file bytes directly by default
-- Optional compressed artifact mode with `archive: true`
+- Optional gzip-compressed upload mode with `archive: true`
 - Optional artifact prefix, retention, overwrite, and missing-file behavior
 
 ## Inputs
@@ -16,7 +16,7 @@ Upload files directly as separate GitHub Actions artifacts without ZIP wrapping.
 - `artifact-prefix` (default ``): Optional prefix added to each artifact name.
 - `retention-days` (optional): Artifact retention in days.
 - `overwrite` (optional): Replace an existing artifact with the same name.
-- `archive` (default `false`): Set to `true` to use the artifact compressor instead of raw file upload.
+- `archive` (default `false`): Set to `true` to gzip-compress each file before upload.
 - `if-no-files-found` (default `warn`): `warn`, `error`, or `ignore` when nothing matches.
 
 ## Outputs
@@ -38,6 +38,8 @@ Example workflow step:
     archive: false
     overwrite: true
 ```
+
+When `archive: true`, each file is compressed with gzip before being uploaded as the artifact payload.
 
 ## Local testing
 

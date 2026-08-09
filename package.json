@@ -17,8 +17,5 @@
     "files"
   ],
   "author": "Dubi253",
-  "dependencies": {
-    "@actions/artifact": "6.2.1",
-    "@actions/core": "^1.10.0"
-  }
+  "dependencies": {}
 }
