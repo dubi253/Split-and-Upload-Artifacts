@@ -22,3 +22,8 @@ jobs:
         run: npm test
       - name: Create Release
         uses: softprops/action-gh-release@v3.0.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          make_latest: true

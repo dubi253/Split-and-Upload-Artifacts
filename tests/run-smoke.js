@@ -19,11 +19,12 @@ function clean() {
 async function main() {
   clean();
   fs.mkdirSync(tmpDir, { recursive: true });
-  fs.writeFileSync(path.join(tmpDir, "hello.txt"), "hello world");
+  const sampleFile = path.join(tmpDir, "hello.txt");
+  fs.writeFileSync(sampleFile, "hello world");
 
   console.log("Running smoke test (TEST_MODE=1)...");
   const env = Object.assign({}, process.env, {
-    INPUT_SOURCE: tmpDir,
+    INPUT_PATH: sampleFile,
     TEST_MODE: "1",
   });
 
@@ -41,7 +42,7 @@ async function main() {
     process.exit(res.status || 1);
   }
 
-  const uploadedMarker = path.join(repoRoot, "artifact.zip.uploaded.txt");
+  const uploadedMarker = path.join(repoRoot, "hello.txt.uploaded.txt");
   if (!fs.existsSync(uploadedMarker)) {
     console.error("Expected uploaded marker not found:", uploadedMarker);
     process.exit(2);

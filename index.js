@@ -1,93 +1,103 @@
 #!/usr/bin/env node
+"use strict";
+
 const core = require("@actions/core");
-const artifact = require("@actions/artifact");
-const { exec } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+const { statSync, globSync, writeFileSync } = require("node:fs");
+const { basename, resolve } = require("node:path");
 
-function execShell(cmd) {
-  return new Promise((resolve, reject) => {
-    exec(
-      cmd,
-      { shell: "/bin/bash", maxBuffer: 1024 * 1024 * 20 },
-      (err, stdout, stderr) => {
-        if (err)
-          return reject(new Error(`${err.message}\n${stderr || stdout}`));
-        resolve({ stdout, stderr });
-      },
-    );
-  });
+const getInput = (n) =>
+  (process.env[`INPUT_${n.replace(/ /g, "_").toUpperCase()}`] || "").trim();
+const warning = (m) => core.warning(m);
+const notice = (m) => core.notice(m);
+function fail(m) {
+  throw new Error(m);
 }
 
-async function run() {
-  try {
-    const source = core.getInput("source", { required: true });
-    const volumeSize = core.getInput("volume-size") || "5g";
-    const archiveName = core.getInput("archive-name") || "artifact";
-    const prefix = core.getInput("artifact-prefix") || "";
-    const compression = core.getInput("compression-level") || "6";
+function setOutput(name, value) {
+  core.setOutput(name, value);
+}
 
-    if (!source || !source.trim())
-      throw new Error("Input `source` is required and was empty.");
+function splitPatterns(s) {
+  return s
+    .split(/[\s,\n]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
 
-    core.info(`Cleaning previous files: ${archiveName}.z* ${archiveName}.zip`);
-    await execShell(`rm -f ${archiveName}.z* ${archiveName}.zip`);
+function artifactName(file, prefix) {
+  const name = basename(file);
+  return prefix ? `${prefix}-${name}` : name;
+}
 
-    let compressionFlag = "";
-    if (/^[0-9]$/.test(compression)) compressionFlag = `-${compression}`;
+async function main() {
+  const pathInput = getInput("path") || getInput("source");
+  if (!pathInput) fail('input "path" is required');
 
-    const zipCmd = `zip -s ${volumeSize} -r ${compressionFlag} ${archiveName}.zip ${source}`;
-    core.info(`Running split zip: ${zipCmd}`);
-    await execShell(zipCmd);
+  const retentionDays = parseInt(getInput("retention-days"), 10) || 0;
+  const overwrite = getInput("overwrite") === "true";
+  const ifNone = getInput("if-no-files-found") || "warn";
+  const prefix = getInput("artifact-prefix") || "";
+  const { DefaultArtifactClient } = await import("@actions/artifact");
+  const client =
+    process.env.TEST_MODE === "1"
+      ? {
+          uploadArtifact: async (name, files) => {
+            const marker = resolve(process.cwd(), `${name}.uploaded.txt`);
+            writeFileSync(marker, files.join("\n"));
+            return { id: Number(String(name).length), size: files.length };
+          },
+          deleteArtifact: async () => ({ id: 0 }),
+        }
+      : new DefaultArtifactClient();
 
-    const cwd = process.cwd();
-    const parts = fs
-      .readdirSync(cwd)
-      .filter(
-        (f) => f.startsWith(`${archiveName}.z`) || f === `${archiveName}.zip`,
-      )
-      .sort();
+  const patterns = splitPatterns(pathInput);
+  const files = [...new Set(patterns.flatMap((p) => globSync(p)))].filter(
+    (f) => {
+      try {
+        return statSync(f).isFile();
+      } catch {
+        return false;
+      }
+    },
+  );
 
-    if (!parts || parts.length === 0) {
-      core.warning("No volume files were generated.");
-      core.setOutput("volumes", "0");
-      core.setOutput("uploaded-artifacts", "");
-      return;
-    }
-
-    let client;
-    if (process.env.TEST_MODE === "1") {
-      client = {
-        uploadArtifact: async (name, files, cwd) => {
-          const marker = path.join(cwd, `${name}.uploaded.txt`);
-          fs.writeFileSync(marker, files.join("\n"));
-          return { artifactName: name, failedItems: [] };
-        },
-      };
-    } else {
-      client = artifact.create();
-    }
-    const uploaded = [];
-
-    for (let i = 0; i < parts.length; i++) {
-      const file = parts[i];
-      const filePath = path.join(cwd, file);
-      const artifactName =
-        prefix && prefix.trim() !== ""
-          ? `${prefix}-${archiveName}-part${i + 1}`
-          : file;
-
-      core.info(`Uploading ${file} as artifact '${artifactName}'`);
-      await client.uploadArtifact(artifactName, [filePath], cwd);
-      uploaded.push(artifactName);
-    }
-
-    core.setOutput("volumes", String(parts.length));
-    core.setOutput("uploaded-artifacts", uploaded.join(","));
-    core.info(`Uploaded ${parts.length} artifacts.`);
-  } catch (error) {
-    core.setFailed(error.message || String(error));
+  if (!files.length) {
+    const msg = `no files matched: ${patterns.join(", ")}`;
+    if (ifNone === "error") fail(msg);
+    if (ifNone === "warn") warning(msg);
+    setOutput("artifacts", "[]");
+    setOutput("volumes", "0");
+    setOutput("uploaded-artifacts", "");
+    return;
   }
+
+  const jobs = new Map();
+  for (const f of files) {
+    const name = artifactName(f, prefix);
+    if (jobs.has(name)) {
+      fail(
+        `two inputs map to the same artifact name "${name}": ${jobs.get(name).file} and ${f}`,
+      );
+    }
+    jobs.set(name, { file: f, size: statSync(f).size });
+  }
+
+  const results = [];
+  for (const [name, { file, size }] of jobs) {
+    if (overwrite && typeof client.deleteArtifact === "function") {
+      await client.deleteArtifact(name);
+    }
+    const r = await client.uploadArtifact(name, [resolve(file)], {
+      retentionDays,
+      compressionLevel: 0,
+    });
+    notice(`uploaded '${name}' (id ${r.id}, ${r.size || size} bytes)`);
+    results.push({ name: r.name || name, id: Number(r.id), size });
+  }
+
+  setOutput("artifacts", JSON.stringify(results));
+  setOutput("volumes", String(results.length));
+  setOutput("uploaded-artifacts", results.map((item) => item.name).join(","));
 }
 
-run();
+main().catch((e) => fail(e && e.stack ? e.stack : String(e)));

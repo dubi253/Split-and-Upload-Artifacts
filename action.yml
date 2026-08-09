@@ -1,33 +1,36 @@
-name: "Split and Upload Artifacts"
-description: "Compress files/folders into volume-limited ZIP parts and upload each part as a separate artifact"
+name: "upload-artifacts"
+description: "Upload files as separate GitHub Actions artifacts without ZIP wrapping"
 author: "your-github-username"
 
 inputs:
-  source:
-    description: "Path(s) to the file(s) or directory to compress. Supports globs and space-separated paths."
+  path:
+    description: "Path(s) or glob(s) to files to upload directly. Supports comma/newline/space-separated patterns."
     required: true
-  volume-size:
-    description: 'Maximum size per volume (e.g., "5g", "1000m").'
+  source:
+    description: "Backward-compatible alias for path."
     required: false
-    default: "5g"
-  archive-name:
-    description: "Base name for the ZIP archive (without extension)."
+  retention-days:
+    description: "Number of days to keep the artifact."
     required: false
-    default: "artifact"
+  overwrite:
+    description: "Replace an existing artifact with the same name."
+    required: false
+  if-no-files-found:
+    description: "What to do when no files match: warn, error, or ignore."
+    required: false
+    default: "warn"
   artifact-prefix:
-    description: "Prefix added to each artifact name in the Actions list."
+    description: "Optional prefix added to each artifact name."
     required: false
     default: ""
-  compression-level:
-    description: "ZIP compression level 0-9 (0 = store only). Default 6."
-    required: false
-    default: "6"
 
 outputs:
+  artifacts:
+    description: "JSON array of uploaded artifacts"
   volumes:
-    description: "Number of volume parts created"
+    description: "Number of uploaded artifacts"
   uploaded-artifacts:
-    description: "List of uploaded artifact names (comma-separated)"
+    description: "Comma-separated list of uploaded artifact names"
 
 runs:
   using: "node24"

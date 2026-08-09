@@ -1,7 +1,7 @@
 {
-  "name": "split-and-upload-artifacts",
+  "name": "upload-artifacts",
   "version": "1.0.0",
-  "description": "Compress files/folders into volume-limited ZIP parts and upload each part as separate GitHub Action artifacts",
+  "description": "Upload files directly as separate GitHub Action artifacts without ZIP wrapping",
   "main": "index.js",
   "engines": {
     "node": ">=24"
@@ -12,13 +12,13 @@
   },
   "keywords": [
     "github-action",
-    "zip",
+    "upload",
     "artifact",
-    "split"
+    "files"
   ],
   "author": "Dubi253",
   "dependencies": {
-    "@actions/artifact": "^0.6.0",
+    "@actions/artifact": "6.2.1",
     "@actions/core": "^1.10.0"
   }
 }
